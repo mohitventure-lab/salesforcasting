@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Sales Forecaster</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#eef1f4;--card:#fff;--ink:#14213d;--mute:#5d6b82;--line:#d9dfe7;--act:#0b7a75;--fc:#e07b00;--band:rgba(224,123,0,.16);--bad:#b3261e}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0e1522;--card:#17213200;--card:#172132;--ink:#e8edf5;--mute:#91a0b8;--line:#2a374d;--act:#3cc4bb;--fc:#ffa233;--band:rgba(255,162,51,.18);--bad:#ff8a80}}
+:root[data-theme=dark]{--bg:#0e1522;--card:#172132;--ink:#e8edf5;--mute:#91a0b8;--line:#2a374d;--act:#3cc4bb;--fc:#ffa233;--band:rgba(255,162,51,.18);--bad:#ff8a80}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1000px;margin:0 auto;padding:20px 16px 60px}
+h1,h2{font-family:"Bricolage Grotesque",system-ui,sans-serif;margin:0}
+h1{font-size:clamp(28px,5vw,40px);letter-spacing:-.02em}h2{font-size:20px;margin-bottom:10px}
+.sub{color:var(--mute);margin:4px 0 20px;max-width:60ch}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
+#drop{border:2px dashed var(--line);border-radius:10px;padding:28px 16px;text-align:center;cursor:pointer;display:block}
+#drop:hover,#drop.on,#drop:focus-within{border-color:var(--act);background:var(--band)}
+#drop b{font-size:17px}#drop span{display:block;color:var(--mute);font-size:13px;margin-top:4px}
+input[type=file]{position:absolute;opacity:0;width:1px;height:1px}
+button,select{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:7px 12px}
+button{cursor:pointer}button.p{background:var(--act);color:#fff;border-color:var(--act);font-weight:600}
+button:focus-visible,select:focus-visible{outline:2px solid var(--act);outline-offset:2px}
+.row{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}.row label{display:flex;flex-direction:column;font-size:13px;color:var(--mute);gap:3px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+.k{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}.k small{color:var(--mute);display:block}.k b{font:700 24px "Bricolage Grotesque",system-ui,sans-serif}
+.k.max{border-color:var(--fc)}.up{color:var(--act)}.dn{color:var(--bad)}
+svg{width:100%;height:auto;display:block}svg text{fill:var(--mute);font-size:11px}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right}th:first-child,td:first-child{text-align:left}th{color:var(--mute);font-weight:500;font-size:13px}
+.wrap{overflow-x:auto}.leg{display:flex;gap:16px;font-size:13px;color:var(--mute);margin-top:6px;flex-wrap:wrap}.leg i{display:inline-block;width:14px;height:3px;margin-right:6px;vertical-align:middle}
+ul.ins{margin:0;padding-left:20px}ul.ins li{margin-bottom:8px}#msg{color:var(--bad);margin-top:10px}
+@media print{#up,#ctl,.noprint{display:none!important}body{background:#fff}.card,.k{break-inside:avoid}}
+</style></head><body><main>
+<h1>Sales Forecaster</h1>
+<p class="sub">Upload your sales history. It picks the most accurate of several models by back-testing, then gives you a forecast with a conservative, expected and maximum case, plus a written report.</p>
+<section class="card" id="up">
+<label id="drop"><input type="file" id="f" accept=".xlsx,.xls,.csv,.pdf"><b>Drop a file here or tap to choose</b><span>Excel (.xlsx, .xls), CSV or PDF with a table. Needs a date column and a sales column.</span></label>
+<div style="margin-top:12px"><button id="demo">Try sample data</button></div><div id="msg" role="alert"></div>
+</section>
+<section class="card" id="ctl" hidden><div class="row">
+<label>Date column<select id="cd"></select></label><label>Sales column<select id="cv"></select></label>
+<label>Forecast horizon<select id="hz"><option value="3">3 months</option><option value="6">6 months</option><option value="12" selected>12 months</option><option value="24">24 months</option></select></label>
+<label>Currency<select id="cu"><option>₹</option><option>$</option><option>€</option><option>£</option><option value="">None</option></select></label>
+<button class="p" id="run">Update forecast</button></div></section>
+<div id="out"></div>
+</main>
+<script>
+const $=s=>document.querySelector(s),MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let rows=[],S={y:0,m:0},sym='₹',info={};
+const msg=t=>$('#msg').textContent=t||'';
+try{pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'}catch(e){}
+function fmt(n,full){const a=Math.abs(n),s=n<0?'-':'';if(sym==='₹'){if(a>=1e7)return s+sym+(a/1e7).toFixed(2)+' Cr';if(a>=1e5)return s+sym+(a/1e5).toFixed(2)+' L';return s+sym+Math.round(a).toLocaleString('en-IN')}
+return s+sym+(full?Math.round(a).toLocaleString('en-US'):new Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:1}).format(a))}
+const pct=x=>(x>=0?'+':'')+(x*100).toFixed(1)+'%';
+function toDate(v){if(v instanceof Date)return isNaN(v)?null:v;if(typeof v!=='string')return null;let s=v.trim(),m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/),d;
+if(m)d=new Date(+m[3],+m[2]-1,+m[1]);else{d=new Date(s);if(isNaN(d))d=new Date(s.replace(/-/g,' '))}
+return isNaN(d)||d.getFullYear()<1990||d.getFullYear()>2100?null:d}
+const serial=v=>new Date(Math.round((v-25569)*864e5));
+const toNum=v=>typeof v==='number'?v:typeof v==='string'&&/\d/.test(v)?parseFloat(v.replace(/[^0-9.\-]/g,'')):NaN;
+async function readPdf(file){const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise,lines=[];
+for(let p=1;p<=pdf.numPages;p++){const tc=await (await pdf.getPage(p)).getTextContent(),g={};
+tc.items.forEach(it=>{if(!it.str.trim())return;const k=Math.round(it.transform[5]/4);(g[k]=g[k]||[]).push({x:it.transform[4],w:it.width,s:it.str.trim()})});
+Object.keys(g).map(Number).sort((a,b)=>b-a).forEach(k=>{const it=g[k].sort((a,b)=>a.x-b.x),c=[];let end=-99;it.forEach(i=>{if(c.length&&i.x-end<8)c[c.length-1]+=' '+i.s;else c.push(i.s);end=i.x+i.w});lines.push(c)})}
+const hi=lines.findIndex(l=>l.length>=2);if(hi<0)throw Error('No table found in this PDF. Try the Excel or CSV version.');
+const h=lines[hi];return lines.slice(hi+1).filter(l=>l.length===h.length).map(l=>Object.fromEntries(h.map((c,i)=>[c,l[i]])))}
+async function load(file){msg();try{const ext=file.name.split('.').pop().toLowerCase();
+if(ext==='pdf')rows=await readPdf(file);else{const wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:true});let best=[];
+wb.SheetNames.forEach(n=>{const r=XLSX.utils.sheet_to_json(wb.Sheets[n],{defval:null});if(r.length>best.length)best=r});rows=best}
+if(rows.length<6)throw Error('Found fewer than 6 data rows. Check that the file has a header row and a table.');setup()}catch(e){msg('Could not read the file: '+e.message)}}
+function setup(){const cols=Object.keys(rows[0]),sc={};
+cols.forEach(c=>{let d=0,n=0,t=0;rows.forEach(r=>{const v=r[c];if(v==null||v==='')return;t++;if(v instanceof Date||(typeof v==='string'&&isNaN(toNum(v))&&toDate(v))||(typeof v==='number'&&/date|month|period|day/i.test(c)&&v>20000&&v<70000))d++;else if(!isNaN(toNum(v)))n++});sc[c]={d:d/(t||1),n:n/(t||1)}});
+const dc=cols.filter(c=>sc[c].d>.7).sort((a,b)=>sc[b].d-sc[a].d)[0],vcs=cols.filter(c=>c!==dc&&sc[c].n>.7).sort((a,b)=>(/sales|revenue|amount|total|value|units|qty/i.test(b)?1:0)-(/sales|revenue|amount|total|value|units|qty/i.test(a)?1:0));
+const opts=cols.map(c=>`<option>${String(c).replace(/</g,'&lt;')}</option>`).join('');$('#cd').innerHTML=opts;$('#cv').innerHTML=opts;
+if(dc)$('#cd').value=dc;if(vcs[0])$('#cv').value=vcs[0];$('#ctl').hidden=false;
+if(!dc||!vcs[0])msg('Could not detect the columns automatically. Pick the date and sales columns, then update.');run()}
+function series(){const dc=$('#cd').value,vc=$('#cv').value,m={};let used=0,skip=0;
+rows.forEach(r=>{let d=r[dc];if(typeof d==='number'&&d>20000&&d<70000)d=serial(d);else d=toDate(d);const v=toNum(r[vc]);if(!d||isNaN(v)){skip++;return}used++;const k=d.getFullYear()*12+d.getMonth();m[k]=(m[k]||0)+v});
+const ks=Object.keys(m).map(Number);if(ks.length<6)throw Error('Need at least 6 distinct months of data (found '+ks.length+'). Check the column choices.');
+const lo=Math.min(...ks),hi=Math.max(...ks),y=[];let fill=0;for(let k=lo;k<=hi;k++){if(m[k]==null){fill++;y.push(y.length?y[y.length-1]:0)}else y.push(m[k])}
+S={y:Math.floor(lo/12),m:lo%12};info={used,skip,fill,n:y.length};return y}
+const mean=a=>a.reduce((s,x)=>s+x,0)/a.length;
+function lin(y){const n=y.length,mx=(n-1)/2,my=mean(y);let sxy=0,sxx=0;y.forEach((v,i)=>{sxy+=(i-mx)*(v-my);sxx+=(i-mx)**2});const b=sxy/sxx;return{a:my-b*mx,b}}
+const M={
+'Linear trend':(y,h)=>{const{a,b}=lin(y),n=y.length;return{fit:y.map((_,i)=>a+b*i),fc:[...Array(h)].map((_,k)=>a+b*(n+k))}},
+'Holt (damped trend)':(y,h)=>{const run=(al,be)=>{let l=y[0],t=y[1]-y[0],sse=0;const fit=[y[0]];for(let i=1;i<y.length;i++){const f=l+.92*t;fit.push(f);sse+=(y[i]-f)**2;const nl=al*y[i]+(1-al)*f;t=be*(nl-l)+(1-be)*.92*t;l=nl}return{fit,l,t,sse}};
+let best;[.2,.4,.6,.8].forEach(a=>[.05,.15,.3].forEach(b=>{const r=run(a,b);if(!best||r.sse<best.sse)best=r}));
+return{fit:best.fit,fc:[...Array(h)].map((_,k)=>{let s=0;for(let j=0;j<=k;j++)s+=.92**(j+1);return best.l+best.t*s})}},
+'Holt-Winters (seasonal)':(y,h)=>{const m=12,n=y.length;if(n<24)return null;const run=(a,b,g)=>{let l=mean(y.slice(0,m)),t=(mean(y.slice(m,2*m))-l)/m;const s=y.slice(0,m).map(v=>v-l),fit=y.slice(0,m),sse=[0];let e=0;
+for(let i=m;i<n;i++){const f=l+t+s[i%m];fit.push(f);e+=(y[i]-f)**2;const nl=a*(y[i]-s[i%m])+(1-a)*(l+t);t=b*(nl-l)+(1-b)*t;s[i%m]=g*(y[i]-nl)+(1-g)*s[i%m];l=nl}return{fit,l,t,s,e}};
+let best;[.1,.3,.5,.7].forEach(a=>[.01,.05,.15].forEach(b=>[.1,.3,.5].forEach(g=>{const r=run(a,b,g);if(!best||r.e<best.e)best=r})));
+return{fit:best.fit,fc:[...Array(h)].map((_,k)=>best.l+best.t*(k+1)+best.s[(n+k)%m])}},
+'Trend + seasonal index':(y,h)=>{const n=y.length;if(n<24)return null;const{a,b}=lin(y),si=Array(12).fill(0),c=Array(12).fill(0);
+y.forEach((v,i)=>{const k=(S.m+i)%12;si[k]+=v-(a+b*i);c[k]++});const ix=si.map((v,k)=>v/(c[k]||1));
+return{fit:y.map((_,i)=>a+b*i+ix[(S.m+i)%12]),fc:[...Array(h)].map((_,k)=>a+b*(n+k)+ix[(S.m+n+k)%12])}}};
+function ens(y,h){const rs=Object.values(M).map(f=>f(y,h)).filter(Boolean);return{fit:y.map((_,i)=>mean(rs.map(r=>r.fit[i]))),fc:[...Array(h)].map((_,k)=>mean(rs.map(r=>r.fc[k])))}}
+function lab(i){const t=S.y*12+S.m+i;return MON[t%12]+" '"+String(Math.floor(t/12)).slice(2)}
+function chart(y,fc,lo,hi){const H=y.length,T=H+fc.length,W=900,Ht=320,L=64,R=14,Tp=14,B=30,mx=Math.max(...y,...hi)*1.05,X=i=>L+(W-L-R)*i/(T-1),Y=v=>Tp+(Ht-Tp-B)*(1-v/mx);
+let s=`<svg viewBox="0 0 ${W} ${Ht}" role="img" aria-label="Sales history and forecast chart">`;
+for(let i=0;i<=4;i++){const v=mx*i/4;s+=`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${fmt(v)}</text>`}
+const st=Math.ceil(T/9);for(let i=0;i<T;i+=st)s+=`<text x="${X(i)}" y="${Ht-8}" text-anchor="middle">${lab(i)}</text>`;
+const bp=fc.map((_,k)=>`${X(H+k)},${Y(hi[k])}`).concat(fc.map((_,k)=>`${X(H+fc.length-1-k)},${Y(lo[fc.length-1-k])}`));
+s+=`<polygon points="${X(H-1)},${Y(y[H-1])} ${bp.join(' ')}" fill="var(--band)"/>`;
+s+=`<polyline fill="none" stroke="var(--act)" stroke-width="2.5" points="${y.map((v,i)=>X(i)+','+Y(v)).join(' ')}"/>`;
+s+=`<polyline fill="none" stroke="var(--fc)" stroke-width="2.5" stroke-dasharray="6 4" points="${X(H-1)},${Y(y[H-1])} ${fc.map((v,k)=>X(H+k)+','+Y(v)).join(' ')}"/>`;
+s+=`<polyline fill="none" stroke="var(--fc)" stroke-width="1" stroke-dasharray="2 3" points="${X(H-1)},${Y(y[H-1])} ${hi.map((v,k)=>X(H+k)+','+Y(v)).join(' ')}"/></svg>`;return s}
+function run(){msg();let y;try{y=series()}catch(e){msg(e.message);$('#out').innerHTML='';return}
+sym=$('#cu').value;const h=+$('#hz').value,n=y.length,hold=Math.min(6,Math.floor(n/4)),tr=y.slice(0,n-hold),te=y.slice(n-hold),res=[];
+const all={...M,'Ensemble (average)':(yy,hh)=>ens(yy,hh)};
+Object.entries(all).forEach(([name,f])=>{const r=f(tr,hold);if(!r)return;let e=0,c=0,se=0;te.forEach((a,i)=>{if(a){e+=Math.abs(r.fc[i]-a)/Math.abs(a);c++}se+=(r.fc[i]-a)**2});res.push({name,f,mape:e/(c||1),rmse:Math.sqrt(se/hold)})});
+res.sort((a,b)=>a.mape-b.mape);const best=res[0],r=best.f(y,h),sk=Math.min(12,Math.floor(n/3)),rs=y.map((v,i)=>v-r.fit[i]).slice(sk),
+sig=Math.max(Math.sqrt(mean(rs.map(x=>x*x))),best.rmse),fc=r.fc.map(v=>Math.max(0,v)),lo=fc.map((v,k)=>Math.max(0,v-1.28*sig*Math.sqrt(1+.12*k))),hi=fc.map((v,k)=>v+1.28*sig*Math.sqrt(1+.12*k));
+const sum=a=>a.reduce((s,x)=>s+x,0),tF=sum(fc),tL=sum(lo),tH=sum(hi),prev=sum(y.slice(-Math.min(h,n))),g=tF/prev-1,l12=sum(y.slice(-Math.min(12,n))),
+yoy=n>=24?l12/sum(y.slice(-24,-12))-1:null,{b}=lin(y),slope=b/mean(y),pi=fc.indexOf(Math.max(...fc));
+const ins=[];ins.push(`<b>Trend.</b> Sales are ${slope>0.002?'growing':slope<-0.002?'declining':'broadly flat'} by about ${(Math.abs(slope)*100).toFixed(1)}% of average monthly sales per month (${fmt(Math.abs(b))} per month)${yoy!=null?`; the last 12 months are ${pct(yoy)} versus the 12 before`:''}.`);
+if(n>=24){const ix=Array(12).fill(0),c=Array(12).fill(0),{a:A,b:B}=lin(y);y.forEach((v,i)=>{const k=(S.m+i)%12;ix[k]+=v/(A+B*i);c[k]++});const q=ix.map((v,k)=>v/c[k]),pk=q.indexOf(Math.max(...q)),tg=q.indexOf(Math.min(...q));
+ins.push(`<b>Seasonality.</b> ${MON[pk]} is typically the strongest month (${pct(q[pk]-1)} against trend) and ${MON[tg]} the weakest (${pct(q[tg]-1)}). Plan stock, staffing and campaigns around that swing of ${((q[pk]-q[tg])*100).toFixed(0)} points.`)}else ins.push(`<b>Seasonality.</b> Seasonal patterns need at least 24 months of data. Add more history to unlock seasonal models.`);
+const mom=y.slice(1).map((v,i)=>y[i]?v/y[i]-1:0),sd=Math.sqrt(mean(mom.map(x=>(x-mean(mom))**2)));
+ins.push(`<b>Volatility.</b> Month-to-month swings average ${(sd*100).toFixed(0)}% (${sd>.2?'high: keep a larger buffer':sd>.1?'moderate':'low: forecasts should be steady'}). The forecast range is about ±${fmt(1.28*sig)} for the first month and widens further out.`);
+ins.push(`<b>Outlook.</b> Expected sales over the next ${h} months total ${fmt(tF)}, ${pct(g)} against the previous ${Math.min(h,n)} months. Peak month: ${lab(n+pi)} at ${fmt(fc[pi])}.`);
+ins.push(`<b>Scenarios.</b> Conservative ${fmt(tL)}, expected ${fmt(tF)}, maximum ${fmt(tH)}. The maximum case is the 90th percentile of outcomes, so there is roughly a 1 in 10 chance of beating it.`);
+const bi=y.indexOf(Math.max(...y)),wi=y.indexOf(Math.min(...y));ins.push(`<b>History.</b> Best month ${lab(bi)} (${fmt(y[bi])}), weakest ${lab(wi)} (${fmt(y[wi])}). ${info.used} rows were used across ${n} months${info.skip?`; ${info.skip} rows were skipped as unreadable`:''}${info.fill?`; ${info.fill} missing months were filled with the previous value`:''}.`);
+ins.push(`<b>Actions.</b> ${g>0.05?'Build capacity and inventory ahead of '+lab(n+pi)+'. ':g<-0.05?'Expect softer demand and review cost and pricing early. ':''}Use the conservative case for cost and cash planning and the maximum case for supply readiness. Refresh this forecast monthly as new sales arrive.`);
+const k=(t,v,c,x)=>`<div class="k ${x||''}"><small>${t}</small><b class="${c||''}">${v}</b></div>`;
+$('#out').innerHTML=`<div class="kpis">${k('Expected, next '+h+' months',fmt(tF))}${k('Maximum case',fmt(tH),'','max')}${k('Conservative case',fmt(tL))}${k('Change vs previous period',pct(g),g>=0?'up':'dn')}${k('Best model',best.name.split(' (')[0])}${k('Back-test accuracy',(100-Math.min(100,best.mape*100)).toFixed(1)+'%')}</div>
+<div class="card"><h2>Sales history and forecast</h2>${chart(y,fc,lo,hi)}<div class="leg"><span><i style="background:var(--act)"></i>Actual</span><span><i style="background:var(--fc)"></i>Expected</span><span><i style="background:var(--band);height:10px"></i>80% range (top edge is the maximum case)</span></div></div>
+<div class="card"><h2>Analysis</h2><ul class="ins">${ins.map(i=>`<li>${i}</li>`).join('')}</ul></div>
+<div class="card"><h2>Monthly forecast</h2><div class="wrap"><table><tr><th>Month</th><th>Conservative</th><th>Expected</th><th>Maximum</th></tr>${fc.map((v,i)=>`<tr><td>${lab(n+i)}</td><td>${fmt(lo[i],1)}</td><td><b>${fmt(v,1)}</b></td><td>${fmt(hi[i],1)}</td></tr>`).join('')}<tr><td><b>Total</b></td><td><b>${fmt(tL,1)}</b></td><td><b>${fmt(tF,1)}</b></td><td><b>${fmt(tH,1)}</b></td></tr></table></div></div>
+<div class="card"><h2>Model comparison</h2><p class="sub" style="margin-top:0">Each model forecast the last ${hold} known months without seeing them. Lower error wins.</p><div class="wrap"><table><tr><th>Model</th><th>Avg. error (MAPE)</th><th>Selected</th></tr>${res.map(x=>`<tr><td>${x.name}</td><td>${(x.mape*100).toFixed(1)}%</td><td>${x===best?'Yes':''}</td></tr>`).join('')}</table></div></div>
+<button class="p noprint" onclick="window.print()">Save report as PDF</button>`}
+const fi=$('#f');fi.onchange=()=>fi.files[0]&&load(fi.files[0]);
+['dragover','dragenter'].forEach(e=>$('#drop').addEventListener(e,x=>{x.preventDefault();$('#drop').classList.add('on')}));
+['dragleave','drop'].forEach(e=>$('#drop').addEventListener(e,x=>{x.preventDefault();$('#drop').classList.remove('on');if(e==='drop'&&x.dataTransfer.files[0])load(x.dataTransfer.files[0])}));
+$('#run').onclick=run;['hz','cu','cd','cv'].forEach(i=>$('#'+i).onchange=run);
+$('#demo').onclick=()=>{let s=7,r=()=>(s=(s*16807)%2147483647)/2147483647;const sea=[.85,.82,.95,1,1.05,.98,.92,.96,1.08,1.2,1.3,1.18];rows=[];
+for(let i=0;i<36;i++){const d=new Date(2023,i,1);rows.push({Date:d,Region:'All',Sales:Math.round((420000+i*9000)*sea[i%12]*(0.94+r()*.12))})}setup()};
+</script></body></html>
